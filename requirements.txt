@@ -2,3 +2,4 @@ streamlit
 groq
 duckduckgo-search
 streamlit-mic-recorder
+pillow
