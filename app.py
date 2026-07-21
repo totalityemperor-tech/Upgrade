@@ -1,23 +1,23 @@
+import base64
 import urllib.parse
-import PIL.Image
 import streamlit as st
 from duckduckgo_search import DDGS
-from google import genai
+from openai import OpenAI
 from streamlit_mic_recorder import speech_to_text
 
 # 1. Setup Page Configuration
 st.set_page_config(page_title="Omni-Tutor AI", page_icon="🎓")
 st.title("🎓 Omni-Tutor AI")
 
-# 2. Retrieve Gemini API Key
-api_key = st.secrets.get("GEMINI_API_KEY")
+# 2. Retrieve OpenAI API Key
+api_key = st.secrets.get("OPENAI_API_KEY")
 
 if not api_key:
-    st.warning("Please configure your GEMINI_API_KEY in .streamlit/secrets.toml")
+    st.warning("Please configure your OPENAI_API_KEY in Streamlit Secrets.")
     st.stop()
 
-# Initialize modern Gemini Client
-client = genai.Client(api_key=api_key)
+# Initialize OpenAI Client
+client = OpenAI(api_key=api_key)
 
 # Initialize Chat History
 if "messages" not in st.session_state:
@@ -28,13 +28,13 @@ if "messages" not in st.session_state:
         }
     ]
 
-# 3. Sidebar Features (File Upload & Audio Input)
+# 3. Sidebar Features
 with st.sidebar:
     st.header("🛠️ Input Options")
 
     # File / Image Upload
     uploaded_file = st.file_uploader(
-        "Upload Homework Image/Document", type=["png", "jpg", "jpeg", "pdf"]
+        "Upload Homework Image", type=["png", "jpg", "jpeg"]
     )
 
     # Speech-to-Text
@@ -54,13 +54,13 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-# Determine Input Source (Text box or Voice)
+# Determine Input Source
 user_prompt = st.chat_input("Ask a question or type 'draw [something]'...")
 if spoken_text:
     user_prompt = spoken_text
 
 if user_prompt:
-    # Append User Message
+    # Display user message
     st.session_state.messages.append({"role": "user", "content": user_prompt})
     with st.chat_message("user"):
         st.write(user_prompt)
@@ -88,7 +88,7 @@ if user_prompt:
 
     # AI CHAT / TUTORING FEATURE
     else:
-        # Contextual Web Search Integration
+        # Contextual Web Search
         context = ""
         if use_web_search:
             with st.spinner("Searching the live web..."):
@@ -98,35 +98,46 @@ if user_prompt:
                         [r["body"] for r in results if "body" in r]
                     )
                 except Exception as e:
-                    st.warning(f"Could not fetch web search results: {e}")
+                    st.warning(f"Could not fetch search results: {e}")
 
-        prompt_with_context = f"""
-        You are a friendly, encouraging homework tutor and social companion for a student. 
-        Explain concepts simply and step-by-step.
-        
-        {context}
-        
-        Student Question: {user_prompt}
-        """
+        # Construct Prompt Content
+        full_prompt = f"""You are a friendly, encouraging homework tutor. Explain concepts simply and step-by-step.
 
-        # Build contents list for Gemini call
-        contents = [prompt_with_context]
+{context}
 
-        # Handle Image File Uploads if provided
-        if uploaded_file and uploaded_file.type.startswith("image/"):
-            img = PIL.Image.open(uploaded_file)
-            contents.append(img)
+Student Question: {user_prompt}"""
+
+        # Build message payload for OpenAI
+        user_content = [{"type": "text", "text": full_prompt}]
+
+        # Convert image to base64 if uploaded
+        if uploaded_file:
+            bytes_data = uploaded_file.getvalue()
+            base64_image = base64.b64encode(bytes_data).decode("utf-8")
+            user_content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{uploaded_file.type};base64,{base64_image}"
+                    },
+                }
+            )
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 try:
-                    response = client.models.generate_content(
-                        model="gemini-2.5-flash", contents=contents
+                    response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {"role": "system", "content": "You are a helpful tutor."},
+                            {"role": "user", "content": user_content},
+                        ],
                     )
 
-                    st.write(response.text)
+                    reply_text = response.choices[0].message.content
+                    st.write(reply_text)
                     st.session_state.messages.append(
-                        {"role": "assistant", "content": response.text}
+                        {"role": "assistant", "content": reply_text}
                     )
                 except Exception as e:
-                    st.error(f"Error generating response: {e}")
+                    st.error(f"Error calling OpenAI API: {e}")
