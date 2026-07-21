@@ -1,115 +1,97 @@
-import os
 import streamlit as st
-from google import genai
-from google.genai import types
+import google.generativeai as genai
+from duckduckgo_search import DDGS
+from streamlit_mic_recorder import speech_to_text
+import urllib.parse
 
-class AdvancedMedicalChatbot:
-    """An advanced, production-grade AI Medical Chatbot with memory capabilities."""
-    
-    def __init__(self, api_key: str):
-        # Encapsulating the API client configurations
-        self.client = genai.Client(api_key=api_key)
-        self.model_name = "gemini-2.5-flash"
-        
-        # System instructions enforcing strict medical boundaries and safety rules
-        self.system_instruction = (
-            "You are an AI Medical Assistant. Analyze user symptoms and offer personalized "
-            "recommendations, potential causes, and lifestyle steps based on context. "
-            "CRITICAL SAFETY RULE: You must always conclude your response with a highly visible "
-            "disclaimer stating that you are an AI, not a healthcare provider, and they must "
-            "seek official professional medical advice immediately for real diagnoses."
-        )
+# 1. Setup Page Configuration
+st.set_page_config(page_title="Omni-Tutor AI", page_icon="🎓")
+st.title("🎓 Omni-Tutor AI")
 
-    def generate_response(self, chat_history: list) -> str:
-        """Processes the full conversation history to maintain memory context."""
-        try:
-            # Transforming our app's memory into the specific format the Gemini API expects
-            contents = []
-            for message in chat_history:
-                role = "user" if message["role"] == "user" else "model"
-                contents.append(types.Content(
-                    role=role,
-                    parts=[types.Part.from_text(text=message["content"])]
-                ))
-            
-            # Executing the contextual API call
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=self.system_instruction,
-                    temperature=0.3, # Low temperature ensures highly predictable, factual responses
-                )
-            )
-            return response.text
-        except Exception as e:
-            return f"System Error: Unable to process request. Details: {str(e)}"
+# 2. Retrieve Free API Key safely from secrets
+# Get a free API key at https://aistudio.google.com/
+api_key = st.secrets.get("GEMINI_API_KEY")
 
-    def save_report(self, chat_history: list):
-        """Feature 2: Compiles the full conversation and saves it to a clean local text file."""
-        with open("medical_consultation_report.txt", "w", encoding="utf-8") as file:
-            file.write("=== PERSONALIZED AI MEDICAL REPORT ===\n\n")
-            for msg in chat_history:
-                speaker = "Patient" if msg["role"] == "user" else "AI Medical Assistant"
-                file.write(f"[{speaker}]:\n{msg['content']}\n")
-                file.write("-" * 40 + "\n")
-        return "Report successfully exported to 'medical_consultation_report.txt'!"
+if not api_key:
+    st.warning("Please configure your free GEMINI_API_KEY in .streamlit/secrets.toml")
+    st.stop()
 
+genai.configure(api_key=api_key)
+model = genai.GenerativeModel("gemini-1.5-flash")
 
-
-# STREAMLIT WEB INTERFACE
-
-st.set_page_config(page_title="AI Medical Assistant", page_icon="🏥", layout="centered")
-
-st.title("🏥 AI-Powered Medical Consultation Assistant")
-st.caption("Enter your symptoms and medical history below for immediate personalized logic guidance.")
-
-# Hardcoding Mr. James' provided API Key directly into the system engine initialization
-MR_JAMES_API_KEY = "AQ.Ab8RN6LBQEl-CHGK4dKX-Nhiy83Ecb2C9pzHc8ci_pTT1WJADw"
-
-# Initializing the chatbot object and keeping it alive across web refreshes using Streamlit session state
-if "chatbot" not in st.session_state:
-    st.session_state.chatbot = AdvancedMedicalChatbot(api_key=MR_JAMES_API_KEY)
-
-# Feature 3: Constructing a persistent conversation memory bank using a Python list
+# Initialize Chat History
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = [
+        {"role": "model", "content": "Hi! I am your AI Omni Tutor. Upload your homework, speak to me, or ask me to search the web or draw an image!"}
+    ]
 
-# Sidebar options for extra interactive controls during presentation
+# 3. Sidebar Features (File Upload & Audio Input)
 with st.sidebar:
-    st.header("Patient Management Tools")
-    st.info("Use this panel to manage data lifecycle operations.")
+    st.header("🛠️ Input Options")
     
-    # Triggering Feature 1: Exporting data to local storage on demand
-    if st.button("💾 Export Consultation Report"):
-        if st.session_state.messages:
-            status_message = st.session_state.chatbot.save_report(st.session_state.messages)
-            st.success(status_message)
-        else:
-            st.warning("No conversation history available to save yet.")
-            
-    if st.button("🗑️ Clear Chat History"):
-        st.session_state.messages = []
-        st.rerun()
-
-# Displaying past chat history on the web interface screen dynamically
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-# Accepting active user input directly via standard web chat interface bars
-if user_input := st.chat_input("Describe your current symptoms or type follow-up questions..."):
+    # File / Image Upload
+    uploaded_file = st.file_uploader("Upload Homework Image/Document", type=["png", "jpg", "jpeg", "pdf"])
     
-    # Append the user's input message to memory list
-    st.session_state.messages.append({"role": "user", "content": user_input})
+    # Speech-to-Text
+    st.subheader("🎤 Voice Input")
+    spoken_text = speech_to_text(language='en', start_prompt="Start Recording", stop_prompt="Stop Recording", key='speech')
+
+    # Web Search Toggle
+    use_web_search = st.checkbox("🔍 Enable Live Web Search")
+
+# Display previous conversation
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
+
+# Determine Input Source (Text box or Voice)
+user_prompt = st.chat_input("Ask a question or type 'draw [something]'...")
+if spoken_text:
+    user_prompt = spoken_text
+
+if user_prompt:
+    # Append User Message
+    st.session_state.messages.append({"role": "user", "content": user_prompt})
     with st.chat_message("user"):
-        st.markdown(user_input)
+        st.write(user_prompt)
+
+    # IMAGE GENERATION FEATURE
+    if user_prompt.lower().startswith("draw ") or user_prompt.lower().startswith("generate image of "):
+        image_prompt = user_prompt.lower().replace("draw ", "").replace("generate image of ", "")
+        encoded_prompt = urllib.parse.quote(image_prompt)
+        image_url = f"https://pollinations.ai/p/{encoded_prompt}"
         
-    # Generate the AI response using contextual memory tracking
-    with st.chat_message("assistant"):
-        with st.spinner("Analyzing symptoms against medical model databases..."):
-            ai_response = st.session_state.chatbot.generate_response(st.session_state.messages)
-            st.markdown(ai_response)
-            
-    # Append the AI's structural response into memory list
-    st.session_state.messages.append({"role": "assistant", "content": ai_response})
+        with st.chat_message("model"):
+            st.image(image_url, caption=f"Generated Image: {image_prompt}")
+            st.session_state.messages.append({"role": "model", "content": f"![{image_prompt}]({image_url})"})
+
+    # AI CHAT / TUTORING FEATURE
+    else:
+        # Contextual Web Search Integration
+        context = ""
+        if use_web_search:
+            with st.spinner("Searching the live web..."):
+                results = DDGS().text(user_prompt, max_results=3)
+                context = "\n\nLive Search Results:\n" + "\n".join([r['body'] for r in results])
+
+        prompt_with_context = f"""
+        You are a friendly, encouraging homework tutor and social companion for a student. 
+        Explain concepts simply and step-by-step.
+        
+        {context}
+        
+        Student Question: {user_prompt}
+        """
+
+        with st.chat_message("model"):
+            with st.spinner("Thinking..."):
+                # Handle Image File Uploads if provided
+                if uploaded_file and uploaded_file.type.startswith("image/"):
+                    import PIL.Image
+                    img = PIL.Image.open(uploaded_file)
+                    response = model.generate_content([prompt_with_context, img])
+                else:
+                    response = model.generate_content(prompt_with_context)
+
+                st.write(response.text)
+                st.session_state.messages.append({"role": "model", "content": response.text})
