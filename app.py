@@ -1,41 +1,35 @@
 import urllib.parse
-import PIL.Image
 import streamlit as st
 from duckduckgo_search import DDGS
-from google import genai
+from groq import Groq
 from streamlit_mic_recorder import speech_to_text
 
 # 1. Setup Page Configuration
 st.set_page_config(page_title="Omni-Tutor AI", page_icon="🎓")
 st.title("🎓 Omni-Tutor AI")
 
-# 2. Retrieve Gemini API Key safely from secrets
-api_key = st.secrets.get("GEMINI_API_KEY")
+# 2. Retrieve Groq API Key
+api_key = st.secrets.get("GROQ_API_KEY")
 
 if not api_key:
-    st.warning("Please configure your GEMINI_API_KEY in Streamlit Secrets.")
+    st.warning("Please configure your GROQ_API_KEY in Streamlit Secrets.")
     st.stop()
 
-# Initialize Gemini Client
-client = genai.Client(api_key=api_key)
+# Initialize Groq Client
+client = Groq(api_key=api_key)
 
 # Initialize Chat History
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant",
-            "content": "Hi! I am your AI Omni Tutor. Upload your homework, speak to me, or ask me to search the web or draw an image!",
+            "content": "Hi! I am your AI Omni Tutor powered by Groq. Ask me anything, speak to me, or tell me to 'draw [something]'!",
         }
     ]
 
 # 3. Sidebar Features
 with st.sidebar:
     st.header("🛠️ Input Options")
-
-    # File / Image Upload
-    uploaded_file = st.file_uploader(
-        "Upload Homework Image", type=["png", "jpg", "jpeg"]
-    )
 
     # Speech-to-Text
     st.subheader("🎤 Voice Input")
@@ -100,30 +94,30 @@ if user_prompt:
                 except Exception as e:
                     st.warning(f"Could not fetch search results: {e}")
 
-        prompt_with_context = f"""You are a friendly, encouraging homework tutor. Explain concepts simply and step-by-step.
+        full_prompt = f"""You are a friendly, encouraging homework tutor. Explain concepts simply and step-by-step.
 
 {context}
 
 Student Question: {user_prompt}"""
 
-        # Prepare payload
-        contents = [prompt_with_context]
-
-        # Attach image if uploaded
-        if uploaded_file and uploaded_file.type.startswith("image/"):
-            img = PIL.Image.open(uploaded_file)
-            contents.append(img)
-
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
+            with st.spinner("Thinking fast..."):
                 try:
-                    response = client.models.generate_content(
-                        model="gemini-2.5-flash", contents=contents
+                    response = client.chat.completions.create(
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": "You are a helpful, encouraging tutor.",
+                            },
+                            {"role": "user", "content": full_prompt},
+                        ],
+                        model="llama-3.3-70b-versatile",
                     )
 
-                    st.write(response.text)
+                    reply_text = response.choices[0].message.content
+                    st.write(reply_text)
                     st.session_state.messages.append(
-                        {"role": "assistant", "content": response.text}
+                        {"role": "assistant", "content": reply_text}
                     )
                 except Exception as e:
-                    st.error(f"Error calling Gemini API: {e}")
+                    st.error(f"Error calling Groq API: {e}")
