@@ -1,23 +1,23 @@
-import base64
 import urllib.parse
+import PIL.Image
 import streamlit as st
 from duckduckgo_search import DDGS
-from openai import OpenAI
+from google import genai
 from streamlit_mic_recorder import speech_to_text
 
 # 1. Setup Page Configuration
 st.set_page_config(page_title="Omni-Tutor AI", page_icon="🎓")
 st.title("🎓 Omni-Tutor AI")
 
-# 2. Retrieve OpenAI API Key
-api_key = st.secrets.get("OPENAI_API_KEY")
+# 2. Retrieve Gemini API Key safely from secrets
+api_key = st.secrets.get("GEMINI_API_KEY")
 
 if not api_key:
-    st.warning("Please configure your OPENAI_API_KEY in Streamlit Secrets.")
+    st.warning("Please configure your GEMINI_API_KEY in Streamlit Secrets.")
     st.stop()
 
-# Initialize OpenAI Client
-client = OpenAI(api_key=api_key)
+# Initialize Gemini Client
+client = genai.Client(api_key=api_key)
 
 # Initialize Chat History
 if "messages" not in st.session_state:
@@ -60,7 +60,7 @@ if spoken_text:
     user_prompt = spoken_text
 
 if user_prompt:
-    # Display user message
+    # Append User Message
     st.session_state.messages.append({"role": "user", "content": user_prompt})
     with st.chat_message("user"):
         st.write(user_prompt)
@@ -88,7 +88,7 @@ if user_prompt:
 
     # AI CHAT / TUTORING FEATURE
     else:
-        # Contextual Web Search
+        # Contextual Web Search Integration
         context = ""
         if use_web_search:
             with st.spinner("Searching the live web..."):
@@ -100,44 +100,30 @@ if user_prompt:
                 except Exception as e:
                     st.warning(f"Could not fetch search results: {e}")
 
-        # Construct Prompt Content
-        full_prompt = f"""You are a friendly, encouraging homework tutor. Explain concepts simply and step-by-step.
+        prompt_with_context = f"""You are a friendly, encouraging homework tutor. Explain concepts simply and step-by-step.
 
 {context}
 
 Student Question: {user_prompt}"""
 
-        # Build message payload for OpenAI
-        user_content = [{"type": "text", "text": full_prompt}]
+        # Prepare payload
+        contents = [prompt_with_context]
 
-        # Convert image to base64 if uploaded
-        if uploaded_file:
-            bytes_data = uploaded_file.getvalue()
-            base64_image = base64.b64encode(bytes_data).decode("utf-8")
-            user_content.append(
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{uploaded_file.type};base64,{base64_image}"
-                    },
-                }
-            )
+        # Attach image if uploaded
+        if uploaded_file and uploaded_file.type.startswith("image/"):
+            img = PIL.Image.open(uploaded_file)
+            contents.append(img)
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 try:
-                    response = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role": "system", "content": "You are a helpful tutor."},
-                            {"role": "user", "content": user_content},
-                        ],
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash", contents=contents
                     )
 
-                    reply_text = response.choices[0].message.content
-                    st.write(reply_text)
+                    st.write(response.text)
                     st.session_state.messages.append(
-                        {"role": "assistant", "content": reply_text}
+                        {"role": "assistant", "content": response.text}
                     )
                 except Exception as e:
-                    st.error(f"Error calling OpenAI API: {e}")
+                    st.error(f"Error calling Gemini API: {e}")
