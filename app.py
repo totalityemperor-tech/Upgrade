@@ -1,5 +1,5 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai
 from duckduckgo_search import DDGS
 from streamlit_mic_recorder import speech_to_text
 import urllib.parse
